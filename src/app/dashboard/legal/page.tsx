@@ -4,13 +4,19 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { Loader2, Plus, Edit, Trash } from 'lucide-react';
-// 1. Importa o nosso novo editor Tiptap
-import TiptapEditor from '@/components/admin/TiptapEditor';
+// 1. CORREÇÃO DO TIPTAP: Importa o 'dynamic' do Next.js
+import dynamic from 'next/dynamic';
 
-// 2. (Opcional) Instale o plugin de tipografia do Tailwind
-// No terminal: npm install -D @tailwindcss/typography
-// E adicione no 'tailwind.config.ts' > plugins: [require('@tailwindcss/typography')]
-// Isso faz o conteúdo do Tiptap (classes 'prose') ficar bonito.
+// 2. CORREÇÃO DO TIPTAP: Carrega o TiptapEditor dinamicamente
+// Isso garante que ele NUNCA seja renderizado no servidor, corrigindo o erro de SSR.
+const TiptapEditor = dynamic(() => import('@/components/admin/TiptapEditor'), {
+  ssr: false, // Fundamental: desliga o Server-Side Rendering para este componente
+  loading: () => (
+    <div className="flex h-[200px] w-full items-center justify-center rounded-md border border-gray-300 bg-white">
+      <Loader2 className="animate-spin" />
+    </div>
+  ),
+});
 
 // Definição do Tipo (Interface)
 type LegalPage = {
@@ -26,6 +32,7 @@ type LegalPage = {
 export default function LegalAdminPage() {
   const [pages, setPages] = useState<LegalPage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingSubmit, setLoadingSubmit] = useState(false); // Loading separado
   const [error, setError] = useState<string | null>(null);
 
   // Estados do Formulário
@@ -39,12 +46,14 @@ export default function LegalAdminPage() {
     content: '',
   });
 
+  // 3. CORREÇÃO DO SUPABASE: Movido `.schema('cms')` para o final da query
   const fetchPages = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('legal_pages')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .schema('cms'); // <-- LOCAL CORRETO É NO FINAL
 
     if (error) {
       setError(error.message);
@@ -83,20 +92,26 @@ export default function LegalAdminPage() {
     window.scrollTo(0, 0);
   };
 
+  // 3. CORREÇÃO DO SUPABASE: Movido `.schema('cms')` para o final da query
   const handleDelete = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir este documento?')) {
-      const { error } = await supabase.from('legal_pages').delete().match({ id });
+      const { error } = await supabase
+        .from('legal_pages')
+        .delete()
+        .match({ id })
+        .schema('cms'); // <-- LOCAL CORRETO É NO FINAL
       if (error) {
         setError(error.message);
       } else {
-        fetchPages();
+        fetchPages(); // Recarrega a lista
       }
     }
   };
 
+  // 3. CORREÇÃO DO SUPABASE: Movido `.schema('cms')` para o final da query
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setLoadingSubmit(true);
     setError(null);
 
     const dataToSubmit = {
@@ -111,15 +126,19 @@ export default function LegalAdminPage() {
     let error;
 
     if (isEditing) {
+      // MODO UPDATE
       const { error: updateError } = await supabase
         .from('legal_pages')
         .update(dataToSubmit)
-        .match({ id: isEditing });
+        .match({ id: isEditing })
+        .schema('cms'); // <-- LOCAL CORRETO É NO FINAL
       error = updateError;
     } else {
+      // MODO INSERT
       const { error: insertError } = await supabase
         .from('legal_pages')
-        .insert(dataToSubmit);
+        .insert(dataToSubmit)
+        .schema('cms'); // <-- LOCAL CORRETO É NO FINAL
       error = insertError;
     }
 
@@ -132,10 +151,9 @@ export default function LegalAdminPage() {
       setIsFormVisible(false);
       fetchPages();
     }
-    setLoading(false);
+    setLoadingSubmit(false);
   };
 
-  // 3. Função para o Tiptap atualizar o estado
   const handleContentChange = (newContent: string) => {
     setPageData((prev) => ({ ...prev, content: newContent }));
   };
@@ -161,7 +179,7 @@ export default function LegalAdminPage() {
       {/* --- MENSAGEM DE ERRO --- */}
       {error && (
         <div className="my-4 rounded-md bg-red-100 p-4 text-red-700">
-          <p className="font-bold">Erro ao salvar:</p>
+          <p className="font-bold">Erro:</p>
           <p>{error}</p>
         </div>
       )}
@@ -214,7 +232,7 @@ export default function LegalAdminPage() {
               </label>
               <input
                 type="text"
-                value={pageData.icon}
+                value={pageData.icon || ''}
                 onChange={(e) => setPageData({ ...pageData, icon: e.target.value })}
                 className="mt-1 block w-full rounded-md border-gray-300 p-3 shadow-sm"
               />
@@ -227,7 +245,7 @@ export default function LegalAdminPage() {
               </label>
               <input
                 type="text"
-                value={pageData.external_reference}
+                value={pageData.external_reference || ''}
                 onChange={(e) => setPageData({ ...pageData, external_reference: e.target.value })}
                 className="mt-1 block w-full rounded-md border-gray-300 p-3 shadow-sm"
               />
@@ -249,10 +267,10 @@ export default function LegalAdminPage() {
           <div className="flex gap-4">
             <button
               type="submit"
-              disabled={loading}
+              disabled={loadingSubmit}
               className="flex items-center gap-2 rounded-btn bg-brand-primary px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-primary/90 disabled:opacity-50"
             >
-              {loading ? <Loader2 className="animate-spin" /> : (isEditing ? 'Salvar Alterações' : 'Criar Documento')}
+              {loadingSubmit ? <Loader2 className="animate-spin" /> : (isEditing ? 'Salvar Alterações' : 'Criar Documento')}
             </button>
             <button
               type="button"
@@ -271,7 +289,9 @@ export default function LegalAdminPage() {
           Documentos Publicados
         </h3>
         {loading && pages.length === 0 ? (
-          <p>Carregando documentos...</p>
+          <div className="flex justify-center p-4">
+            <Loader2 className="animate-spin" />
+          </div>
         ) : (
           <ul className="divide-y divide-gray-200">
             {pages.map((page) => (
